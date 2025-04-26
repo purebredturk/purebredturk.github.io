@@ -1,0 +1,329 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Renkli Günlük İşler</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <!-- Added for barcode scanning -->
+  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(135deg, #1f2937, #4b0082);
+      color: #ffffff;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1024px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+    .modal {
+      background: rgba(0, 0, 0, 0.7);
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: #1f2937;
+      border-radius: 1rem;
+      padding: 2rem;
+      max-width: 95%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      animation: modalPop 0.4s ease-out;
+    }
+    .card {
+      background: #1f2937;
+      border-radius: 1rem;
+      padding: 1.5rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      transition: transform 0.3s ease;
+    }
+    .card:hover {
+      transform: translateY(-5px);
+    }
+    .hover-bg {
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+    .hover-bg:hover {
+      background: #7c3aed;
+      color: #ffffff;
+    }
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #7c3aed;
+      color: #ffffff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      z-index: 1000;
+      animation: slideIn 0.3s ease-in, pulse 0.5s ease-in-out 2, fadeOut 0.3s ease-out 2s forwards;
+    }
+    .clock-container {
+      background: #1f2937;
+      border: 2px solid #a855f7;
+      padding: 1.5rem;
+      border-radius: 1rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      text-align: center;
+      animation: fadeIn 0.6s ease-in;
+    }
+    .clock-item {
+      background: #2d3748;
+      border-radius: 0.75rem;
+      padding: 1rem;
+    }
+    .clock-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #d8b4fe;
+    }
+    .clock-label {
+      font-size: 1rem;
+      color: #e5e7eb;
+    }
+    .newyear-container {
+      background: #1f2937;
+      border: 2px solid #a855f7;
+      padding: 2rem;
+      border-radius: 1.5rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    .hamburger-icon {
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      width: 28px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .hamburger-icon span {
+      width: 100%;
+      height: 4px;
+      background: #ffffff;
+      border-radius: 2px;
+      transition: all 0.3s ease;
+    }
+    .hamburger-icon.open span:nth-child(1) {
+      transform: rotate(45deg) translate(6px, 6px);
+    }
+    .hamburger-icon.open span:nth-child(2) {
+      opacity: 0;
+    }
+    .hamburger-icon.open span:nth-child(3) {
+      transform: rotate(-45deg) translate(6px, -6px);
+    }
+    .nav-link {
+      transition: all 0.3s ease;
+      padding: 0.5rem 1rem;
+      border-radius: 0.5rem;
+    }
+    .nav-link:hover {
+      background: #7c3aed;
+      color: #ffffff;
+    }
+    .nav-link.active {
+      background: #7c3aed;
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .result-box {
+      background: #2d3748;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 20px;
+      background: #4b5563;
+      border-radius: 9999px;
+      transition: all 0.3s ease;
+    }
+    .toggle-switch input {
+      display: none;
+    }
+    .toggle-switch .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: #d1d5db;
+      border-radius: 50%;
+      transition: all 0.3s ease;
+    }
+    .toggle-switch input:checked + .slider {
+      transform: translateX(20px);
+      background: #7c3aed;
+    }
+    .toggle-switch input:checked ~ .toggle-switch {
+      background: #1f2937;
+    }
+    .note-item {
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    .note-item.fade-out {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    @keyframes modalPop {
+      0% { opacity: 0; transform: scale(0.8) rotate(-5deg); }
+      100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    }
+    @keyframes fadeIn {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideMenuIn {
+      from { transform: translateY(-100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+      to { opacity: 0; transform: translateX(100%); }
+    }
+    @media (max-width: 640px) {
+      .container {
+        padding: 0.75rem;
+      }
+      .nav-list {
+        display: none;
+      }
+      .nav-list.open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #1f2937;
+        padding: 1rem;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        z-index: 1000;
+        animation: slideMenuIn 0.3s ease-out;
+      }
+      .hamburger-icon {
+        display: flex;
+      }
+      .modal-content {
+        max-width: 95%;
+        padding: 1.5rem;
+      }
+      table {
+        font-size: 0.875rem;
+        min-width: 600px;
+      }
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      h1 {
+        font-size: 1.75rem;
+      }
+      input, select, textarea {
+        font-size: 0.875rem;
+        padding: 0.75rem;
+        min-height: 2.5rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.75rem 1.5rem;
+        min-height: 48px;
+      }
+      .nav-link {
+        padding: 0.75rem 1rem;
+        font-size: 1.1rem;
+      }
+      .header-container {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+    @media (min-width: 1024px) {
+      .container {
+        padding: 2rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="scripts.js"></script>
+  <script>
+    try {
+      ReactDOM.render(React.createElement(App), document.getElementById('root'));
+      console.log("React uygulaması başarıyla yüklendi!");
+    } catch (e) {
+      console.error("React render hatası:", e);
+      document.body.innerHTML += '<div style="color: red; padding: 20px;">Hata: Uygulama yüklenemedi! Konsolu kontrol edin.</div>';
+    }
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9364fe07be814583',t:'MTc0NTY1OTEwMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
